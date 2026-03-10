@@ -8,9 +8,10 @@ export default function CountryRelationPanel({
   isLoadingRelation,
   onClearSelection,
   onClearRelation,
+  className = "",
 }) {
   return (
-    <div className="absolute right-4 top-4 z-[1200] w-[360px] max-w-[calc(100%-2rem)] space-y-2">
+    <div className={`absolute right-4 top-4 z-[1200] w-[360px] max-w-[calc(100%-2rem)] space-y-2 ${className}`}>
       <div className="atlas-surface-strong rounded-xl p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs text-zinc-300">

@@ -257,6 +257,7 @@ export default function GlobeMap({
   initialZoom = 2.7,
   minZoom = 2.4,
   maxZoom = 6,
+  markerVariant = "classic",
   instructionText = "Rotate to inspect global spillovers. Scroll to zoom. Click a red marker for country intelligence.",
 }) {
   const mountRef = useRef(null);
@@ -365,10 +366,117 @@ export default function GlobeMap({
 
     const pinTexture = createPinTexture();
     const pulseTexture = createPulseTexture();
-    const markerSprites = [];
+    const markerTargets = [];
     const pulseSprites = [];
+    const elevatedPins = [];
+    const upAxis = new THREE.Vector3(0, 1, 0);
 
-    hotspots.forEach((spot) => {
+    hotspots.forEach((spot, index) => {
+      const heatFactor = clamp(Number(spot.heat || 0) / 100, 0.18, 1);
+
+      if (markerVariant === "elevated") {
+        const normal = latLngToVector3(spot.lat, spot.lng, 1).normalize();
+        const stemLength = 0.14 + heatFactor * 0.2;
+        const headRadius = 0.026 + heatFactor * 0.022;
+        const coneHeight = headRadius * 1.55;
+        const pulseScale = 0.28 + heatFactor * 0.24;
+        const markerGroup = new THREE.Group();
+        markerGroup.position.copy(normal.clone().multiplyScalar(EARTH_RADIUS + 0.006));
+        markerGroup.quaternion.setFromUnitVectors(upAxis, normal);
+
+        const stem = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.007, 0.011, stemLength, 12, 1, true),
+          new THREE.MeshStandardMaterial({
+            color: "#fb7185",
+            emissive: "#f43f5e",
+            emissiveIntensity: 0.85,
+            transparent: true,
+            opacity: 0.72,
+            roughness: 0.25,
+            metalness: 0.35,
+          }),
+        );
+        stem.position.set(0, stemLength * 0.5, 0);
+        markerGroup.add(stem);
+
+        const cap = new THREE.Mesh(
+          new THREE.SphereGeometry(headRadius, 16, 16),
+          new THREE.MeshStandardMaterial({
+            color: "#fb7185",
+            emissive: "#be123c",
+            emissiveIntensity: 1.25,
+            roughness: 0.22,
+            metalness: 0.3,
+          }),
+        );
+        const baseCapY = stemLength + headRadius * 0.2;
+        cap.position.set(0, baseCapY, 0);
+        cap.userData = {
+          type: "hotspot",
+          spot,
+          hoverAnchor: cap,
+        };
+        markerGroup.add(cap);
+
+        const tip = new THREE.Mesh(
+          new THREE.ConeGeometry(headRadius * 0.55, coneHeight, 10),
+          new THREE.MeshStandardMaterial({
+            color: "#fecdd3",
+            emissive: "#fb7185",
+            emissiveIntensity: 0.95,
+            roughness: 0.18,
+            metalness: 0.42,
+          }),
+        );
+        const baseTipY = stemLength + headRadius + coneHeight * 0.42;
+        tip.position.set(0, baseTipY, 0);
+        markerGroup.add(tip);
+
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(headRadius * 1.9, Math.max(headRadius * 0.11, 0.0035), 8, 28),
+          new THREE.MeshBasicMaterial({
+            color: "#fb7185",
+            transparent: true,
+            opacity: 0.56,
+            depthWrite: false,
+          }),
+        );
+        const baseRingY = stemLength + headRadius * 0.26;
+        ring.position.set(0, baseRingY, 0);
+        ring.rotation.x = Math.PI / 2;
+        markerGroup.add(ring);
+
+        const pulse = new THREE.Sprite(
+          new THREE.SpriteMaterial({
+            map: pulseTexture,
+            color: "#fb7185",
+            transparent: true,
+            opacity: 0.5,
+            depthWrite: false,
+          }),
+        );
+        pulse.scale.set(pulseScale, pulseScale, 1);
+        pulse.position.set(0, baseRingY, 0);
+        pulse.userData = { baseScale: pulseScale };
+        pulseSprites.push(pulse);
+        markerGroup.add(pulse);
+
+        markerTargets.push(cap);
+        elevatedPins.push({
+          group: markerGroup,
+          cap,
+          tip,
+          ring,
+          pulse,
+          baseCapY,
+          baseTipY,
+          baseRingY,
+          driftOffset: index * 0.67 + Math.random(),
+        });
+        scene.add(markerGroup);
+        return;
+      }
+
       const surfacePoint = latLngToVector3(spot.lat, spot.lng, EARTH_RADIUS + 0.01);
       const pinPoint = latLngToVector3(spot.lat, spot.lng, EARTH_RADIUS + 0.08);
 
@@ -389,14 +497,15 @@ export default function GlobeMap({
         depthWrite: false,
       });
       const pinSprite = new THREE.Sprite(pinMaterial);
-      const scale = 0.16 + clamp(Number(spot.heat || 0) / 100, 0.2, 1) * 0.08;
+      const scale = 0.16 + heatFactor * 0.08;
       pinSprite.scale.set(scale, scale * 1.3, 1);
       pinSprite.position.copy(pinPoint);
       pinSprite.userData = {
         type: "hotspot",
         spot,
+        hoverAnchor: pinSprite,
       };
-      markerSprites.push(pinSprite);
+      markerTargets.push(pinSprite);
       scene.add(pinSprite);
 
       const pulseMaterial = new THREE.SpriteMaterial({
@@ -470,7 +579,7 @@ export default function GlobeMap({
       pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
       pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const intersects = raycaster.intersectObjects(markerSprites, false);
+      const intersects = raycaster.intersectObjects(markerTargets, false);
       updateHover(intersects[0]?.object || null);
     };
 
@@ -499,6 +608,8 @@ export default function GlobeMap({
     window.addEventListener("resize", resize);
 
     const clock = new THREE.Clock();
+    const hoveredWorldPosition = new THREE.Vector3();
+    const hoveredProjectedPosition = new THREE.Vector3();
     const animate = () => {
       const elapsed = clock.getElapsedTime();
       earth.rotation.y += 0.0008;
@@ -510,6 +621,20 @@ export default function GlobeMap({
         pulse.scale.set(base * wobble, base * wobble, 1);
       });
 
+      elevatedPins.forEach((pin) => {
+        const bob = Math.sin(elapsed * 2.65 + pin.driftOffset) * 0.048;
+        pin.cap.position.y = pin.baseCapY + bob;
+        pin.tip.position.y = pin.baseTipY + bob * 1.2;
+        pin.pulse.position.y = pin.baseRingY + bob * 0.9;
+        pin.ring.position.y = pin.baseRingY + bob * 0.82;
+
+        const ringPulse = 1 + Math.sin(elapsed * 2.2 + pin.driftOffset) * 0.22;
+        pin.ring.scale.set(ringPulse, ringPulse, 1);
+        if (pin.ring.material && !Array.isArray(pin.ring.material)) {
+          pin.ring.material.opacity = 0.34 + (ringPulse - 0.78) * 0.78;
+        }
+      });
+
       arcParticles.forEach((particle) => {
         particle.offset = (particle.offset + particle.speed) % 1;
         const point = particle.curve.getPointAt(particle.offset);
@@ -518,10 +643,12 @@ export default function GlobeMap({
 
       if (tooltipEl) {
         if (hoveredMarker) {
-          const projected = hoveredMarker.position.clone().project(camera);
-          const x = (projected.x * 0.5 + 0.5) * renderer.domElement.clientWidth;
-          const y = (-projected.y * 0.5 + 0.5) * renderer.domElement.clientHeight;
-          const inFront = projected.z < 1;
+          const anchor = hoveredMarker.userData?.hoverAnchor || hoveredMarker;
+          anchor.getWorldPosition(hoveredWorldPosition);
+          hoveredProjectedPosition.copy(hoveredWorldPosition).project(camera);
+          const x = (hoveredProjectedPosition.x * 0.5 + 0.5) * renderer.domElement.clientWidth;
+          const y = (-hoveredProjectedPosition.y * 0.5 + 0.5) * renderer.domElement.clientHeight;
+          const inFront = hoveredProjectedPosition.z < 1;
           if (inFront) {
             tooltipEl.style.opacity = "1";
             tooltipEl.style.transform = `translate(-50%, -100%) translate(${x}px, ${y - 10}px)`;
@@ -555,7 +682,7 @@ export default function GlobeMap({
         mount.removeChild(renderer.domElement);
       }
     };
-  }, [hotspotLookup, hotspots, renderedArcs, mapKey, initialZoom, minZoom, maxZoom]);
+  }, [hotspotLookup, hotspots, renderedArcs, mapKey, initialZoom, minZoom, maxZoom, markerVariant]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#020712]">

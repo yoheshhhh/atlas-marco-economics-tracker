@@ -429,6 +429,12 @@ export default function WorldPulse({ embedded = false }) {
 
   const spilloverHotspots = data?.spillover_map?.hotspots || [];
   const spilloverArcs = data?.spillover_map?.arcs || [];
+  const spilloverHotspotById = useMemo(() => {
+    return new Map(spilloverHotspots.map((spot) => [String(spot.id || ""), spot]));
+  }, [spilloverHotspots]);
+  const spilloverHotspotOptions = useMemo(() => {
+    return [...spilloverHotspots].sort((left, right) => String(left?.name || "").localeCompare(String(right?.name || "")));
+  }, [spilloverHotspots]);
 
   const countryIntelRows = useMemo(() => {
     if (!focusedCountry?.name) return [];
@@ -498,6 +504,18 @@ export default function WorldPulse({ embedded = false }) {
     return null;
   }, [mapStartCountry, mapEndCountry, relationData]);
 
+  useEffect(() => {
+    if (mapStartCountry?.id && !spilloverHotspotById.has(String(mapStartCountry.id))) {
+      setMapStartCountry(null);
+    }
+    if (mapEndCountry?.id && !spilloverHotspotById.has(String(mapEndCountry.id))) {
+      setMapEndCountry(null);
+    }
+    if (focusedCountry?.id && !spilloverHotspotById.has(String(focusedCountry.id))) {
+      setFocusedCountry(null);
+    }
+  }, [mapStartCountry, mapEndCountry, focusedCountry, spilloverHotspotById]);
+
   const handleSelectCountry = (spot) => {
     if (!spot) return;
     setFocusedCountry(spot);
@@ -520,6 +538,40 @@ export default function WorldPulse({ embedded = false }) {
       setMapSelectionMode(null);
       return;
     }
+  };
+
+  const setMapStartById = (countryId) => {
+    setMapSelectionMode(null);
+    const key = String(countryId || "").trim();
+    if (!key) {
+      setMapStartCountry(null);
+      return;
+    }
+    const spot = spilloverHotspotById.get(key);
+    if (!spot) return;
+    setMapStartCountry(spot);
+    if (mapEndCountry?.id === spot.id) {
+      setMapEndCountry(null);
+    }
+    setFocusedCountry(spot);
+  };
+
+  const setMapEndById = (countryId) => {
+    setMapSelectionMode(null);
+    const key = String(countryId || "").trim();
+    if (!key) {
+      setMapEndCountry(null);
+      return;
+    }
+    const spot = spilloverHotspotById.get(key);
+    if (!spot) return;
+    if (mapStartCountry?.id === spot.id) {
+      setMapEndCountry(null);
+      setFocusedCountry(spot);
+      return;
+    }
+    setMapEndCountry(spot);
+    setFocusedCountry(spot);
   };
 
   const clearMapSelection = () => {
@@ -617,7 +669,7 @@ export default function WorldPulse({ embedded = false }) {
     ? `Selecting ${mapSelectionMode} country: click a map pin`
     : "Rotate, zoom, and click red country markers to inspect spillovers.";
 
-  const renderRelationPicker = () => (
+  const renderInlineRelationPicker = () => (
     <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.1em]">
       <button
         type="button"
@@ -655,6 +707,90 @@ export default function WorldPulse({ embedded = false }) {
     </div>
   );
 
+  const renderFullscreenRelationPicker = () => (
+    <div className="absolute left-4 top-[78px] z-[1300] w-[min(680px,calc(100%-2rem))] rounded-2xl border border-cyan-300/20 bg-black/62 p-3 shadow-[0_18px_42px_rgba(0,0,0,0.52)] backdrop-blur-xl">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-cyan-100/90">Route Builder</div>
+          <div className="mt-1 text-[11px] text-zinc-400">Set start/end directly or pick pins on the globe.</div>
+        </div>
+        {(mapStartCountry || mapEndCountry) ? (
+          <button
+            type="button"
+            onClick={clearMapSelection}
+            className="atlas-focus-ring rounded-full border border-white/20 px-3 py-1 text-[10px] uppercase tracking-[0.1em] text-zinc-300 transition hover:border-white/30 hover:text-zinc-100"
+          >
+            Clear Route
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+        <label className="space-y-1">
+          <div className="text-[10px] uppercase tracking-[0.11em] text-zinc-500">Start Country</div>
+          <select
+            value={mapStartCountry?.id || ""}
+            onChange={(event) => setMapStartById(event.target.value)}
+            className="atlas-focus-ring w-full rounded-lg border border-white/18 bg-black/40 px-2.5 py-2 text-sm text-zinc-100 outline-none transition hover:border-white/28"
+          >
+            <option value="">Select start country</option>
+            {spilloverHotspotOptions.map((spot) => (
+              <option key={`start-${spot.id}`} value={spot.id}>
+                {spot.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="space-y-1">
+          <div className="text-[10px] uppercase tracking-[0.11em] text-zinc-500">End Country</div>
+          <select
+            value={mapEndCountry?.id || ""}
+            onChange={(event) => setMapEndById(event.target.value)}
+            className="atlas-focus-ring w-full rounded-lg border border-white/18 bg-black/40 px-2.5 py-2 text-sm text-zinc-100 outline-none transition hover:border-white/28"
+          >
+            <option value="">Select end country</option>
+            {spilloverHotspotOptions.map((spot) => (
+              <option key={`end-${spot.id}`} value={spot.id}>
+                {spot.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.1em]">
+        <button
+          type="button"
+          onClick={() => setMapSelectionMode("start")}
+          className={`atlas-focus-ring rounded-full border px-2.5 py-1 transition ${
+            mapSelectionMode === "start"
+              ? "border-white/40 bg-white/[0.12] text-zinc-100"
+              : "border-white/18 bg-white/[0.04] text-zinc-300 hover:border-white/30 hover:text-zinc-100"
+          }`}
+        >
+          {mapSelectionMode === "start" ? "Picking Start..." : "Pick Start On Globe"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMapSelectionMode("end")}
+          className={`atlas-focus-ring rounded-full border px-2.5 py-1 transition ${
+            mapSelectionMode === "end"
+              ? "border-white/40 bg-white/[0.12] text-zinc-100"
+              : "border-white/18 bg-white/[0.04] text-zinc-300 hover:border-white/30 hover:text-zinc-100"
+          }`}
+        >
+          {mapSelectionMode === "end" ? "Picking End..." : "Pick End On Globe"}
+        </button>
+        {relationData ? (
+          <span className="rounded-full border border-cyan-300/35 bg-cyan-300/12 px-2.5 py-1 text-cyan-100">
+            Quality {String(relationData.relation_quality_label || "mixed")} {relationData.relation_quality_score}/100
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+
   const heroSpilloverPanel = (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -671,7 +807,7 @@ export default function WorldPulse({ embedded = false }) {
           Fullscreen
         </button>
       </div>
-      {renderRelationPicker()}
+      {renderInlineRelationPicker()}
 
       <div className="relative h-[348px] overflow-hidden rounded-2xl border border-white/12 bg-black/25 backdrop-blur-sm">
         <GlobeMap
@@ -834,18 +970,21 @@ export default function WorldPulse({ embedded = false }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[78] bg-black/90 p-3 backdrop-blur-sm sm:p-6"
+            className="fixed inset-x-0 bottom-0 top-[74px] z-[120] bg-black/92 p-2 backdrop-blur-sm sm:p-4"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.98, y: 8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.98, y: 8 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className="relative mx-auto h-full max-w-[1500px] overflow-hidden rounded-2xl border border-white/15 bg-black/65 shadow-[0_26px_70px_rgba(0,0,0,0.58)]"
+              className="relative mx-auto h-full max-w-[1700px] overflow-hidden rounded-2xl border border-cyan-300/20 bg-black/70 shadow-[0_26px_72px_rgba(0,0,0,0.62)]"
             >
-              <div className="absolute inset-x-0 top-0 z-[1300] flex items-center justify-between border-b border-white/10 bg-black/50 px-4 py-3">
-                <div className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-100">
-                  Cross-Region Spillover Globe
+              <div className="absolute inset-x-0 top-0 z-[1300] flex items-center justify-between border-b border-white/10 bg-black/56 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-100">Cross-Region Spillover Globe</div>
+                  <div className="text-[11px] text-zinc-400">
+                    Elevated 3D markers and bilateral relation tracing for selected countries.
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -857,8 +996,8 @@ export default function WorldPulse({ embedded = false }) {
                 </button>
               </div>
 
-              <div className="absolute inset-0 pt-[53px]">
-                <div className="absolute left-4 top-3 z-[1300]">{renderRelationPicker()}</div>
+              <div className="absolute inset-0 pt-[64px]">
+                {renderFullscreenRelationPicker()}
                 <GlobeMap
                   mapKey="hero-spillover-fullscreen"
                   hotspots={spilloverHotspots}
@@ -868,10 +1007,11 @@ export default function WorldPulse({ embedded = false }) {
                   initialZoom={3}
                   minZoom={2.2}
                   maxZoom={7}
+                  markerVariant="elevated"
                   instructionText={mapInstructionText}
                 />
 
-                {(mapStartCountry || relationData) ? (
+                {(mapStartCountry || mapEndCountry || relationData) ? (
                   <CountryRelationPanel
                     startCountry={mapStartCountry}
                     endCountry={mapEndCountry}
@@ -879,6 +1019,7 @@ export default function WorldPulse({ embedded = false }) {
                     isLoadingRelation={isFetchingRelation}
                     onClearSelection={clearMapSelection}
                     onClearRelation={clearMapRelation}
+                    className="right-4 top-[236px] md:top-[190px]"
                   />
                 ) : null}
 
@@ -897,7 +1038,7 @@ export default function WorldPulse({ embedded = false }) {
                 <button
                   type="button"
                   onClick={() => setMapFullscreenOpen(false)}
-                  className="atlas-focus-ring absolute bottom-5 right-5 z-[1300] inline-flex items-center gap-1 rounded-full border border-white/20 bg-black/55 px-4 py-2 text-xs font-medium uppercase tracking-[0.1em] text-zinc-100 transition hover:bg-black/75"
+                  className="atlas-focus-ring absolute bottom-5 right-5 z-[1300] inline-flex items-center gap-1 rounded-full border border-white/20 bg-black/62 px-4 py-2 text-xs font-medium uppercase tracking-[0.1em] text-zinc-100 transition hover:bg-black/78"
                 >
                   <Minimize2 className="h-4 w-4" />
                   Return To Website
