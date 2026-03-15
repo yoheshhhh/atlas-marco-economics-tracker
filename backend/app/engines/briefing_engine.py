@@ -711,6 +711,10 @@ class BriefingEngine:
             reverse=True,
         )
         selected_sources = scored_sources[:8]
+        live_selected_sources = [
+            row for row in selected_sources if not str(getattr(row.get("article"), "article_id", "")).startswith("seed-")
+        ]
+        scoring_sources = live_selected_sources if live_selected_sources else selected_sources
 
         insight_rows: list[NavigatorThemeInsight] = []
         for theme in live.themes[:10]:
@@ -723,7 +727,7 @@ class BriefingEngine:
                 ]
             ).lower()
             token_overlap = sum(1 for term in prompt_terms if term in descriptor)
-            source_support = sum(1 for row in selected_sources if row["theme_id"] == theme.theme_id)
+            source_support = sum(1 for row in scoring_sources if row["theme_id"] == theme.theme_id)
             relevance = float(
                 clamp(
                     token_overlap * 0.14
@@ -749,12 +753,26 @@ class BriefingEngine:
                 f"{theme.mention_count} verified mentions, {theme.source_diversity} sources, "
                 f"cross-region spread {theme.cross_region_spread}."
             )
+            hotness_score, coolness_score, trend_direction, trend_velocity = self._theme_motion_scores(theme=theme)
+            plain_story = self._plain_english_theme_story(
+                theme=theme,
+                trend_direction=trend_direction,
+                horizon=horizon,
+                source_support=source_support,
+            )
             insight_rows.append(
                 NavigatorThemeInsight(
                     theme_id=theme.theme_id,
                     label=theme.label,
                     relevance_score=round(relevance, 4),
                     heat_state=theme.state,
+                    hotness_score=hotness_score,
+                    coolness_score=coolness_score,
+                    trend_direction=trend_direction,
+                    trend_velocity=trend_velocity,
+                    evidence_count=source_support,
+                    source_diversity=int(theme.source_diversity),
+                    plain_english_story=plain_story,
                     local_impact=local_impact,
                     global_impact=global_impact,
                     rationale=rationale,
@@ -769,6 +787,16 @@ class BriefingEngine:
                     label=fallback_theme.label,
                     relevance_score=0.35,
                     heat_state=fallback_theme.state,
+                    hotness_score=int(clamp(int(fallback_theme.temperature), 0, 100)),
+                    coolness_score=int(clamp(100 - int(fallback_theme.temperature), 0, 100)),
+                    trend_direction="stable",
+                    trend_velocity=0.0,
+                    evidence_count=0,
+                    source_diversity=int(fallback_theme.source_diversity),
+                    plain_english_story=(
+                        f"{fallback_theme.label} is being monitored, but there is not enough live source depth yet "
+                        "to confirm acceleration or cooling."
+                    ),
                     local_impact="Local impact map is still stabilizing while source density builds.",
                     global_impact="Cross-market channel mapping is currently low-confidence due to limited overlap.",
                     rationale=f"{fallback_theme.label} selected as closest active macro theme.",
@@ -1879,6 +1907,81 @@ class BriefingEngine:
         if media_type == "image":
             return "Visual context can reinforce narrative direction and event urgency."
         return "Provides additional context for scenario framing and risk monitoring."
+
+    def _theme_motion_scores(self, *, theme: Any) -> tuple[int, int, str, float]:
+        temperature = float(getattr(theme, "temperature", 0.0) or 0.0)
+        momentum = float(getattr(theme, "momentum", 0.0) or 0.0)
+        evidence = float(getattr(theme, "mention_count", 0) or 0)
+        source_diversity = float(getattr(theme, "source_diversity", 0) or 0)
+        market_reaction = float(getattr(theme, "market_reaction_score", 0.0) or 0.0)
+
+        hotness = int(
+            clamp(
+                round(
+                    temperature * 0.52
+                    + max(momentum, 0.0) * 3.4
+                    + min(22.0, evidence * 1.3)
+                    + min(14.0, source_diversity * 2.0)
+                    + market_reaction * 0.12
+                ),
+                0,
+                100,
+            )
+        )
+        coolness = int(
+            clamp(
+                round(
+                    (100.0 - temperature) * 0.48
+                    + max(-momentum, 0.0) * 3.8
+                    + min(14.0, max(0.0, 8.0 - source_diversity) * 1.8)
+                    + max(0.0, 55.0 - market_reaction) * 0.22
+                ),
+                0,
+                100,
+            )
+        )
+
+        if momentum >= 2.5:
+            trend_direction = "rising"
+        elif momentum <= -2.5:
+            trend_direction = "falling"
+        else:
+            trend_direction = "stable"
+
+        return hotness, coolness, trend_direction, round(momentum, 2)
+
+    def _plain_english_theme_story(
+        self,
+        *,
+        theme: Any,
+        trend_direction: str,
+        horizon: str,
+        source_support: int,
+    ) -> str:
+        label = str(getattr(theme, "label", "This theme"))
+        mentions = int(getattr(theme, "mention_count", 0) or 0)
+        diversity = int(getattr(theme, "source_diversity", 0) or 0)
+        spread = int(getattr(theme, "cross_region_spread", 0) or 0)
+        top_region = str((getattr(theme, "top_regions", []) or ["global"])[0]).replace("_", " ")
+        top_asset = str((getattr(theme, "top_assets", []) or ["multi-asset markets"])[0]).replace("_", " ")
+
+        if trend_direction == "rising":
+            return (
+                f"{label} is heating up because more independent sources are repeating the same message, and the "
+                f"signal is spreading beyond one country. In plain terms, this can start with {top_region} headlines "
+                f"and then show up in {top_asset} pricing over the next {horizon} cycle."
+            )
+        if trend_direction == "falling":
+            return (
+                f"{label} is cooling because headline pressure is losing speed and confirmation is narrowing. "
+                f"For a non-specialist: markets still care, but the urgency is fading unless fresh catalysts appear "
+                f"over the next {horizon} cycle."
+            )
+        return (
+            f"{label} is currently stable: there are {mentions} mentions across {diversity} sources "
+            f"({source_support} directly linked to this analysis), with spillover tracked in {spread} regions. "
+            "This means the theme is active but not yet decisively accelerating or fading."
+        )
 
     def _global_impact_channel(self, *, theme: Any, horizon: str) -> str:
         theme_id = str(getattr(theme, "theme_id", "")).strip().lower()
