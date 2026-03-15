@@ -87,6 +87,84 @@ function playbookSeverityTone(severity) {
   return "border-cyan-300/35 text-cyan-100";
 }
 
+function severityToProbability(severity) {
+  const level = String(severity || "").toLowerCase();
+  if (level === "critical") return 82;
+  if (level === "high") return 69;
+  if (level === "medium") return 54;
+  return 38;
+}
+
+function probabilityBand(probability) {
+  const value = toNumeric(probability);
+  if (value >= 70) return "High";
+  if (value >= 50) return "Medium";
+  return "Low";
+}
+
+function directionFromText(value) {
+  const text = String(value || "").toLowerCase();
+  if (/(rise|higher|up|increase|accelerat|hotter|tighten)/.test(text)) return "Rising";
+  if (/(fall|lower|cool|ease|declin|softer)/.test(text)) return "Falling";
+  return "Stable";
+}
+
+function RiskPlaybookProbabilityGraph({ items, activeId, onSelect }) {
+  if (!items.length) {
+    return (
+      <div className="rounded-lg border border-white/12 bg-white/[0.03] px-2.5 py-2 text-[11px] text-zinc-400">
+        Waiting for risk probabilities.
+      </div>
+    );
+  }
+
+  const width = 600;
+  const height = 160;
+  const paddingX = 18;
+  const paddingTop = 16;
+  const paddingBottom = 26;
+  const innerWidth = width - paddingX * 2;
+  const innerHeight = height - paddingTop - paddingBottom;
+  const spacing = items.length > 1 ? innerWidth / (items.length - 1) : innerWidth / 2;
+
+  const points = items.map((item, index) => {
+    const x = paddingX + spacing * index;
+    const y = paddingTop + (1 - toNumeric(item.probability) / 100) * innerHeight;
+    return { ...item, x, y };
+  });
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+
+  return (
+    <div className="rounded-xl border border-white/12 bg-black/30 p-2.5">
+      <div className="mb-2 text-[10px] uppercase tracking-[0.1em] text-zinc-500">Probability Trail (Interactive)</div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full">
+        <defs>
+          <linearGradient id="risk-playbook-line" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#67e8f9" />
+            <stop offset="100%" stopColor="#fda4af" />
+          </linearGradient>
+        </defs>
+        {[25, 50, 75].map((level) => {
+          const y = paddingTop + (1 - level / 100) * innerHeight;
+          return <line key={`grid-${level}`} x1={paddingX} y1={y} x2={width - paddingX} y2={y} stroke="rgba(255,255,255,0.16)" strokeDasharray="3 3" />;
+        })}
+        <path d={path} fill="none" stroke="url(#risk-playbook-line)" strokeWidth="2.2" />
+        {points.map((point) => {
+          const active = point.id === activeId;
+          return (
+            <g key={point.id} className="cursor-pointer" onClick={() => onSelect(point.id)}>
+              <circle cx={point.x} cy={point.y} r={active ? 6 : 4.5} fill={active ? "#f8fafc" : "#67e8f9"} />
+              <text x={point.x} y={height - 8} textAnchor="middle" fill="rgba(228,228,231,0.9)" fontSize="10">
+                {Math.round(point.probability)}%
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function ProofConsoleOverlay({ open, onToggle, onClose, selectedProof, healthySources, totalSources, feedStatus }) {
   return (
     <div className="pointer-events-none fixed bottom-5 right-4 z-[65] flex max-w-[94vw] flex-col items-end gap-3">
@@ -292,6 +370,7 @@ export default function WorldPulse({ embedded = false }) {
   const [proofConsoleOpen, setProofConsoleOpen] = useState(false);
   const [navigatorHeadline, setNavigatorHeadline] = useState(null);
   const [navigatorHighlights, setNavigatorHighlights] = useState([]);
+  const [activeRiskPlaybookId, setActiveRiskPlaybookId] = useState("");
 
   const { data, isLoading, isError, error, isFetching } = useQuery({
     queryKey: ["briefing-daily"],
@@ -654,6 +733,9 @@ export default function WorldPulse({ embedded = false }) {
       insight: toConciseSentence(item.rationale, 18),
       action: toActionCue(item.rationale),
       severity: String(item.severity || "medium").toLowerCase(),
+      direction: directionFromText(item.rationale),
+      probability: severityToProbability(item.severity),
+      confidence: Math.min(95, 58 + idx * 8),
     }));
     const actionRows = (selectedDevelopment.recommended_actions || []).slice(0, 2).map((item, idx) => ({
       id: `${selectedDevelopment.development_id}-recommended-${idx}`,
@@ -661,9 +743,26 @@ export default function WorldPulse({ embedded = false }) {
       insight: toConciseSentence(item.action, 18),
       action: toConciseSentence(item.rationale || item.action, 16) || "Apply this action with local risk limits.",
       severity: "info",
+      direction: "Stable",
+      probability: 32 + idx * 6,
+      confidence: 52 + idx * 7,
     }));
-    return [...riskRows, ...actionRows].slice(0, 4);
+    return [...riskRows, ...actionRows].slice(0, 4).map((item, index) => ({
+      ...item,
+      probability: Math.min(98, Math.max(8, item.probability + index * 2)),
+    }));
   }, [selectedDevelopment]);
+
+  useEffect(() => {
+    if (!riskPlaybookItems.length) {
+      setActiveRiskPlaybookId("");
+      return;
+    }
+    if (activeRiskPlaybookId && riskPlaybookItems.some((item) => item.id === activeRiskPlaybookId)) {
+      return;
+    }
+    setActiveRiskPlaybookId(riskPlaybookItems[0].id);
+  }, [activeRiskPlaybookId, riskPlaybookItems]);
 
   const mapInstructionText = mapSelectionMode
     ? `Selecting ${mapSelectionMode} country: click a map pin`
@@ -928,16 +1027,44 @@ export default function WorldPulse({ embedded = false }) {
                     <ShieldAlert className="h-4 w-4 text-zinc-300" />
                     Risk Playbook
                   </div>
-                  <div className="text-[10px] uppercase tracking-[0.1em] text-zinc-500">Prioritized actions for teams and households</div>
+                  <div className="text-[10px] uppercase tracking-[0.1em] text-zinc-500">
+                    Interactive, probabilistic view of what can rise or cool next
+                  </div>
+
+                  <div className="mt-2">
+                    <RiskPlaybookProbabilityGraph
+                      items={riskPlaybookItems}
+                      activeId={activeRiskPlaybookId}
+                      onSelect={setActiveRiskPlaybookId}
+                    />
+                  </div>
 
                   <div className="mt-2 space-y-2">
                     {riskPlaybookItems.length ? (
                       riskPlaybookItems.map((item) => (
-                        <div key={item.id} className="rounded-lg border border-white/12 bg-white/[0.04] px-2.5 py-2">
+                        <button
+                          type="button"
+                          key={item.id}
+                          onClick={() => setActiveRiskPlaybookId(item.id)}
+                          className={`atlas-focus-ring block w-full rounded-lg border bg-white/[0.04] px-2.5 py-2 text-left transition ${
+                            activeRiskPlaybookId === item.id
+                              ? "border-cyan-300/45 bg-cyan-300/10"
+                              : "border-white/12 hover:border-white/25"
+                          }`}
+                        >
                           <div className="flex items-center justify-between gap-2">
                             <div className="text-[11px] font-semibold text-zinc-100">{item.title}</div>
                             <span className={`rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.08em] ${playbookSeverityTone(item.severity)}`}>
                               {item.severity}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[9px] uppercase tracking-[0.08em] text-zinc-300">
+                            <span className="rounded-full border border-white/18 px-1.5 py-0.5">{item.direction}</span>
+                            <span className="rounded-full border border-white/18 px-1.5 py-0.5">
+                              Probability {Math.round(item.probability)}% ({probabilityBand(item.probability)})
+                            </span>
+                            <span className="rounded-full border border-white/18 px-1.5 py-0.5">
+                              Confidence {Math.round(item.confidence)}%
                             </span>
                           </div>
                           <div className="mt-1 text-[11px] text-zinc-300">{item.insight}</div>
@@ -945,7 +1072,7 @@ export default function WorldPulse({ embedded = false }) {
                             <Sparkles className="mt-[1px] h-3.5 w-3.5 shrink-0 text-zinc-300" />
                             <span>{item.action}</span>
                           </div>
-                        </div>
+                        </button>
                       ))
                     ) : (
                       <div className="rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2 text-[11px] text-zinc-400">

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { BrainCircuit, ChevronLeft, ChevronRight, FileUp, Loader2, Send, Sparkles } from "lucide-react";
+import { BrainCircuit, ChevronLeft, ChevronRight, FileUp, Flame, Loader2, Send, Snowflake, Sparkles } from "lucide-react";
 import { clearMemoryVaultCache, fetchNewsHeadlines, runNewsNavigator } from "@/api/atlasClient";
 import KeywordHighlighter from "@/components/worldpulse/KeywordHighlighter";
 
@@ -96,6 +96,18 @@ function insightStateLabel(value) {
   return "Stable";
 }
 
+function trendLabel(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "rising") return "On The Rise";
+  if (normalized === "falling") return "On The Fall";
+  return "Sideways";
+}
+
+function toNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function extractTerms(text) {
   const words = String(text || "")
     .toLowerCase()
@@ -144,6 +156,7 @@ export default function NewsNavigatorPanel({ onHeadlineSelected = null, onThemeS
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [selectedThemeId, setSelectedThemeId] = useState("");
+  const [themeHotCoolFilter, setThemeHotCoolFilter] = useState("all");
 
   const [headlines, setHeadlines] = useState([]);
   const [headlineTotal, setHeadlineTotal] = useState(0);
@@ -450,6 +463,42 @@ export default function NewsNavigatorPanel({ onHeadlineSelected = null, onThemeS
     return insights.find((item) => item.theme_id === selectedThemeId) || insights[0];
   }, [result, selectedThemeId]);
 
+  const macroThemeRows = useMemo(() => {
+    const rows = Array.isArray(result?.theme_insights) ? result.theme_insights : [];
+    const normalized = rows.map((item) => {
+      const hotness = toNumber(item.hotness_score, Math.round(toNumber(item.relevance_score) * 100));
+      const coolness = toNumber(item.coolness_score, Math.max(0, 100 - hotness));
+      return {
+        ...item,
+        hotness,
+        coolness,
+        trend_direction: String(item.trend_direction || "stable").toLowerCase(),
+        plain_english_story:
+          item.plain_english_story ||
+          `${item.label} is ${String(item.heat_state || "neutral").toLowerCase()} based on current live source flow and market confirmation.`,
+      };
+    });
+
+    const filtered = normalized.filter((item) => {
+      if (themeHotCoolFilter === "hot") return item.hotness >= item.coolness;
+      if (themeHotCoolFilter === "cool") return item.coolness > item.hotness;
+      return true;
+    });
+
+    const sorted = [...filtered].sort((left, right) => {
+      if (themeHotCoolFilter === "cool") {
+        return right.coolness - left.coolness;
+      }
+      return right.hotness - left.hotness;
+    });
+    return sorted.slice(0, 5);
+  }, [result?.theme_insights, themeHotCoolFilter]);
+
+  const liveEvidenceCount = useMemo(() => {
+    const rows = Array.isArray(result?.sources) ? result.sources : [];
+    return rows.filter((item) => !String(item.article_id || "").startsWith("seed-")).length;
+  }, [result?.sources]);
+
   const goHeadline = (direction) => {
     if (!headlines.length) return;
     const currentIndex = selectedHeadlineIndex >= 0 ? selectedHeadlineIndex : 0;
@@ -700,6 +749,76 @@ export default function NewsNavigatorPanel({ onHeadlineSelected = null, onThemeS
             {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             {isRunning ? "Analyzing..." : "Run Navigator"}
           </button>
+
+          <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/8 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] uppercase tracking-[0.1em] text-cyan-100/85">Macro Theme Temperature</div>
+              <div className="rounded-full border border-white/20 px-2 py-0.5 text-[9px] uppercase tracking-[0.08em] text-zinc-200">
+                Live evidence {liveEvidenceCount}/{(result?.sources || []).length || 0}
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[
+                { id: "all", label: "All" },
+                { id: "hot", label: "Hot" },
+                { id: "cool", label: "Cool" },
+              ].map((option) => {
+                const active = themeHotCoolFilter === option.id;
+                return (
+                  <button
+                    key={`theme-filter-${option.id}`}
+                    type="button"
+                    onClick={() => setThemeHotCoolFilter(option.id)}
+                    className={`atlas-focus-ring rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.08em] transition ${
+                      active
+                        ? "border-white/35 bg-white/[0.14] text-zinc-100"
+                        : "border-white/18 bg-white/[0.03] text-zinc-300 hover:border-white/30 hover:text-zinc-100"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-2.5 space-y-2">
+              {macroThemeRows.length ? (
+                macroThemeRows.map((item) => (
+                  <button
+                    key={`macro-theme-${item.theme_id}`}
+                    type="button"
+                    onClick={() => {
+                      setSelectedThemeId(item.theme_id);
+                      if (typeof onThemeSelected === "function") {
+                        onThemeSelected(item.theme_id, selectedHeadline, result);
+                      }
+                    }}
+                    className="atlas-focus-ring w-full rounded-lg border border-white/14 bg-white/[0.04] px-2.5 py-2 text-left transition hover:border-white/30 hover:bg-white/[0.08]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold text-zinc-100">{item.label}</div>
+                      <div className="text-[9px] uppercase tracking-[0.09em] text-zinc-300">{trendLabel(item.trend_direction)}</div>
+                    </div>
+                    <div className="mt-1 grid grid-cols-2 gap-1 text-[10px] text-zinc-300">
+                      <div className="rounded-md border border-rose-200/20 bg-rose-300/10 px-1.5 py-1">
+                        <Flame className="mr-1 inline h-3 w-3 text-rose-100" />
+                        Hotness {item.hotness}
+                      </div>
+                      <div className="rounded-md border border-cyan-200/20 bg-cyan-300/10 px-1.5 py-1">
+                        <Snowflake className="mr-1 inline h-3 w-3 text-cyan-100" />
+                        Coolness {item.coolness}
+                      </div>
+                    </div>
+                    <div className="mt-1.5 text-[11px] leading-relaxed text-zinc-300">{item.plain_english_story}</div>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-lg border border-white/12 bg-white/[0.02] px-2 py-1.5 text-[11px] text-zinc-400">
+                  Run Navigator to populate hot/cool macro themes from live evidence.
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5 text-[11px] leading-relaxed text-zinc-300">
             Responses include both <span className="font-semibold text-zinc-100">local</span> and{" "}

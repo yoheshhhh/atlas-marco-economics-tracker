@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { ArrowRight, LogIn, Sparkles, UserPlus } from "lucide-react";
-
+import DnaParticleBackdrop from "@/components/auth/DnaParticleBackdrop";
 import AtlasMark from "@/components/brand/AtlasMark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,7 @@ export default function AuthScreen() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#06070b] text-zinc-50">
+      <DnaParticleBackdrop />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(81,129,255,0.18),transparent_34%),radial-gradient(circle_at_80%_20%,rgba(95,211,190,0.14),transparent_28%),linear-gradient(180deg,#07080d_0%,#05060a_52%,#030407_100%)]" />
       <div className="absolute inset-0 opacity-50 [background-image:linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] [background-size:32px_32px]" />
 

@@ -10,10 +10,17 @@ class Settings(BaseSettings):
     app_name: str = "Atlas Backend"
     app_env: str = Field(default="dev", alias="APP_ENV")
     api_v1_prefix: str = "/api/v1"
+    cors_allowed_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173",
+        alias="CORS_ALLOWED_ORIGINS",
+    )
+    cors_allow_origin_regex: str = Field(default=r"^https://.*\.vercel\.app$", alias="CORS_ALLOW_ORIGIN_REGEX")
+    cors_allow_credentials: bool = Field(default=False, alias="CORS_ALLOW_CREDENTIALS")
 
     supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_anon_key: str = Field(default="", alias="SUPABASE_ANON_KEY")
     supabase_service_role_key: str = Field(default="", alias="SUPABASE_SERVICE_ROLE_KEY")
+    supabase_query_timeout_seconds: float = Field(default=2.8, alias="SUPABASE_QUERY_TIMEOUT_SECONDS")
     auth_timeout_seconds: float = Field(default=10.0, alias="AUTH_TIMEOUT_SECONDS")
     test_login_email: str = Field(default="atlas.test@demo.local", alias="TEST_LOGIN_EMAIL")
     test_login_password: str = Field(default="AtlasDemo123!", alias="TEST_LOGIN_PASSWORD")

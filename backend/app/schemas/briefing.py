@@ -309,6 +309,13 @@ class NavigatorThemeInsight(BaseModel):
     label: str
     relevance_score: float = Field(..., ge=0.0, le=1.0)
     heat_state: str
+    hotness_score: int = Field(default=0, ge=0, le=100)
+    coolness_score: int = Field(default=0, ge=0, le=100)
+    trend_direction: str = "stable"
+    trend_velocity: float = 0.0
+    evidence_count: int = Field(default=0, ge=0)
+    source_diversity: int = Field(default=0, ge=0)
+    plain_english_story: str = ""
     local_impact: str
     global_impact: str
     rationale: str

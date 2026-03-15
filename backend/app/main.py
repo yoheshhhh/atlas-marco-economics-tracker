@@ -10,6 +10,8 @@ from app.data.seed import get_data_repository
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    allowed_origins = [origin.strip() for origin in str(settings.cors_allowed_origins or "").split(",") if origin.strip()]
+    allow_origin_regex = str(settings.cors_allow_origin_regex or "").strip() or None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -30,8 +32,9 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=allowed_origins,
+        allow_origin_regex=allow_origin_regex,
+        allow_credentials=settings.cors_allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )
